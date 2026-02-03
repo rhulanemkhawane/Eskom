@@ -54,7 +54,7 @@ Accurate hourly forecasts allow:
 ## Data Sources
 
 ### 1. Eskom Electricity Demand Data
-- Source: **:contentReference[oaicite:0]{index=0}**
+- Source: **(https://www.eskom.co.za/dataportal/)**
 - Description:
   - Historical national electricity demand
   - Hourly or sub-hourly resolution (depending on release)
