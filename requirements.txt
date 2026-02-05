@@ -10,6 +10,9 @@ pip
 python-dotenv
 ruff
 scikit-learn
+statsmodels
+meteostat
+pyarrow
 tqdm
 typer
 -e .
