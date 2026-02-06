@@ -46,7 +46,6 @@ def _rolling_features(series: pd.Series, windows: list[int]) -> pd.DataFrame:
 def build_ml_features(
     df: pd.DataFrame,
     config=CONFIG,
-    include_weather: bool = True,
     drop_target_na: bool = True,
 ) -> Tuple[pd.DataFrame, pd.Series]:
     if config.target_col not in df.columns:
@@ -58,13 +57,6 @@ def build_ml_features(
     X = _calendar_features(index)
     X = X.join(_lag_features(target, config.target_lags))
     X = X.join(_rolling_features(target, config.rolling_windows))
-
-    if include_weather:
-        weather_cols = [c for c in df.columns if c.startswith(config.weather_prefix)]
-        if weather_cols:
-            X = X.join(df[weather_cols])
-        else:
-            logger.warning("No weather columns found while include_weather=True.")
 
     combined = X.join(target.rename("y"))
     if drop_target_na:
@@ -89,7 +81,7 @@ def main(
 ) -> None:
     logger.info("Loading processed dataset for feature generation...")
     df = pd.read_parquet(input_path)
-    X, y = build_ml_features(df, CONFIG, include_weather=True)
+    X, y = build_ml_features(df, CONFIG)
     features = X.join(y.rename(CONFIG.target_col))
     features.to_parquet(output_path, index=True)
     logger.success(f"Features saved to {output_path}")

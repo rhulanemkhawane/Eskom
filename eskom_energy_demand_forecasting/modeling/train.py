@@ -14,9 +14,7 @@ import typer
 from eskom_energy_demand_forecasting.config import CONFIG
 from eskom_energy_demand_forecasting.dataset import (
     engineer_target,
-    fetch_meteostat_hourly,
     load_eskom_data,
-    merge_eskom_weather,
     save_processed_dataset,
 )
 from eskom_energy_demand_forecasting.features import build_ml_features, build_target_series
@@ -159,6 +157,101 @@ def _baseline_predictions(
     return preds
 
 
+def _calendar_features_for_ts(ts: pd.Timestamp) -> Dict[str, float]:
+    hour = ts.hour
+    dayofweek = ts.dayofweek
+    month = ts.month
+    return {
+        "hour": hour,
+        "dayofweek": dayofweek,
+        "month": month,
+        "is_weekend": 1 if dayofweek >= 5 else 0,
+        "hour_sin": float(np.sin(2 * np.pi * hour / 24)),
+        "hour_cos": float(np.cos(2 * np.pi * hour / 24)),
+        "dow_sin": float(np.sin(2 * np.pi * dayofweek / 7)),
+        "dow_cos": float(np.cos(2 * np.pi * dayofweek / 7)),
+    }
+
+
+def _lag_and_roll_features(history: pd.Series, config=CONFIG) -> Dict[str, float]:
+    feats: Dict[str, float] = {}
+    for lag in config.target_lags:
+        if len(history) >= lag:
+            feats[f"lag_{lag}"] = float(history.iloc[-lag])
+        else:
+            feats[f"lag_{lag}"] = np.nan
+
+    for window in config.rolling_windows:
+        if len(history) >= window:
+            window_vals = history.iloc[-window:]
+            feats[f"roll_mean_{window}"] = float(window_vals.mean())
+            feats[f"roll_std_{window}"] = float(window_vals.std())
+        else:
+            feats[f"roll_mean_{window}"] = np.nan
+            feats[f"roll_std_{window}"] = np.nan
+    return feats
+
+
+def _build_feature_row(
+    ts: pd.Timestamp,
+    history: pd.Series,
+    feature_columns: List[str],
+    config=CONFIG,
+) -> pd.DataFrame:
+    row: Dict[str, float] = {}
+    row.update(_calendar_features_for_ts(ts))
+    row.update(_lag_and_roll_features(history, config))
+
+    return pd.DataFrame([row], columns=feature_columns)
+
+
+def _recursive_baseline_predictions(
+    y_history: pd.Series, val_idx: pd.DatetimeIndex, config=CONFIG
+) -> Dict[str, pd.Series]:
+    results: Dict[str, List[float]] = {"Naive": [], "SeasonalNaive": [], "RollingMean": []}
+
+    for model_name in results.keys():
+        history = y_history.copy()
+        preds: List[float] = []
+        for ts in val_idx:
+            if model_name == "Naive":
+                pred = float(history.iloc[-1]) if len(history) >= 1 else np.nan
+            elif model_name == "SeasonalNaive":
+                if len(history) >= config.seasonal_period:
+                    pred = float(history.iloc[-config.seasonal_period])
+                else:
+                    pred = np.nan
+            else:  # RollingMean
+                if len(history) >= config.seasonal_period:
+                    pred = float(history.iloc[-config.seasonal_period:].mean())
+                else:
+                    pred = np.nan
+
+            preds.append(pred)
+            history = pd.concat([history, pd.Series([pred], index=[ts])])
+
+        results[model_name] = preds
+
+    return {k: pd.Series(v, index=val_idx) for k, v in results.items()}
+
+
+def _recursive_model_predictions(
+    model,
+    y_history: pd.Series,
+    val_idx: pd.DatetimeIndex,
+    feature_columns: List[str],
+    config=CONFIG,
+) -> pd.Series:
+    preds: List[float] = []
+    history = y_history.copy()
+    for ts in val_idx:
+        X_row = _build_feature_row(ts, history, feature_columns, config)
+        pred = float(model.predict(X_row)[0])
+        preds.append(pred)
+        history = pd.concat([history, pd.Series([pred], index=[ts])])
+    return pd.Series(preds, index=val_idx)
+
+
 def _get_tree_model():
     try:
         from lightgbm import LGBMRegressor
@@ -218,7 +311,6 @@ def rolling_origin_backtest(
 ) -> Tuple[pd.DataFrame, Dict[str, Dict[str, float]]]:
     folds = make_backtest_folds(df_trainval.index, config)
     y_series = build_target_series(df_trainval, config)
-    X_all, y_all = build_ml_features(df_trainval, config, include_weather=True)
 
     fold_metrics: List[Dict[str, object]] = []
     model_scores: Dict[str, List[float]] = {}
@@ -230,9 +322,10 @@ def rolling_origin_backtest(
         logger.info(f"Backtest fold {fold_id}/{len(folds)}")
         y_train = y_series.loc[train_idx]
         y_val = y_series.loc[val_idx]
+        df_train = df_trainval.loc[train_idx]
 
         # Baselines
-        baseline_preds = _baseline_predictions(y_series, val_idx, config)
+        baseline_preds = _recursive_baseline_predictions(y_train, val_idx, config)
         for model_name, pred in baseline_preds.items():
             metrics = _evaluate_predictions(y_val, pred, config)
             metrics_row = {"fold": fold_id, "model": model_name, **metrics}
@@ -242,49 +335,53 @@ def rolling_origin_backtest(
             pred_df.to_csv(predictions_dir / f"fold_{fold_id}_{model_name}.csv")
 
         # ETS
-        ets_pred = _train_ets(y_train, len(val_idx))
-        if ets_pred is not None:
-            ets_series = pd.Series(ets_pred, index=val_idx)
-            metrics = _evaluate_predictions(y_val, ets_series, config)
-            metrics_row = {"fold": fold_id, "model": "ETS", **metrics}
-            fold_metrics.append(metrics_row)
-            model_scores.setdefault("ETS", []).append(metrics["MAE"])
-            pred_df = pd.DataFrame({"y_true": y_val, "y_pred": ets_series})
-            pred_df.to_csv(predictions_dir / f"fold_{fold_id}_ETS.csv")
+        if config.enable_ets:
+            ets_pred = _train_ets(y_train, len(val_idx))
+            if ets_pred is not None:
+                ets_series = pd.Series(ets_pred, index=val_idx)
+                metrics = _evaluate_predictions(y_val, ets_series, config)
+                metrics_row = {"fold": fold_id, "model": "ETS", **metrics}
+                fold_metrics.append(metrics_row)
+                model_scores.setdefault("ETS", []).append(metrics["MAE"])
+                pred_df = pd.DataFrame({"y_true": y_val, "y_pred": ets_series})
+                pred_df.to_csv(predictions_dir / f"fold_{fold_id}_ETS.csv")
 
         # ML models
-        X_train = X_all.loc[train_idx].copy()
-        y_train_ml = y_all.loc[train_idx].copy()
-        X_val = X_all.loc[val_idx].copy()
-        y_val_ml = y_all.loc[val_idx].copy()
+        X_train, y_train_ml = build_ml_features(df_train, config)
 
-        if X_train.empty or X_val.empty:
+        if X_train.empty:
             logger.warning("Skipping ML models for fold due to empty feature set.")
             continue
 
         # Tree-based
-        tree_name, tree_model = _get_tree_model()
-        tree_model.fit(X_train, y_train_ml)
-        tree_pred = pd.Series(tree_model.predict(X_val), index=X_val.index)
-        metrics = _evaluate_predictions(y_val_ml, tree_pred, config)
-        metrics_row = {"fold": fold_id, "model": tree_name, **metrics}
-        fold_metrics.append(metrics_row)
-        model_scores.setdefault(tree_name, []).append(metrics["MAE"])
-        pred_df = pd.DataFrame({"y_true": y_val_ml, "y_pred": tree_pred})
-        pred_df.to_csv(predictions_dir / f"fold_{fold_id}_{tree_name}.csv")
+        if config.enable_tree_model:
+            tree_name, tree_model = _get_tree_model()
+            tree_model.fit(X_train, y_train_ml)
+            tree_pred = _recursive_model_predictions(
+                tree_model, y_train, val_idx, list(X_train.columns), config
+            )
+            metrics = _evaluate_predictions(y_val, tree_pred, config)
+            metrics_row = {"fold": fold_id, "model": tree_name, **metrics}
+            fold_metrics.append(metrics_row)
+            model_scores.setdefault(tree_name, []).append(metrics["MAE"])
+            pred_df = pd.DataFrame({"y_true": y_val, "y_pred": tree_pred})
+            pred_df.to_csv(predictions_dir / f"fold_{fold_id}_{tree_name}.csv")
 
         # ElasticNet
-        from sklearn.linear_model import ElasticNet
+        if config.enable_elasticnet:
+            from sklearn.linear_model import ElasticNet
 
-        enet = ElasticNet(random_state=config.random_seed)
-        enet.fit(X_train, y_train_ml)
-        enet_pred = pd.Series(enet.predict(X_val), index=X_val.index)
-        metrics = _evaluate_predictions(y_val_ml, enet_pred, config)
-        metrics_row = {"fold": fold_id, "model": "ElasticNet", **metrics}
-        fold_metrics.append(metrics_row)
-        model_scores.setdefault("ElasticNet", []).append(metrics["MAE"])
-        pred_df = pd.DataFrame({"y_true": y_val_ml, "y_pred": enet_pred})
-        pred_df.to_csv(predictions_dir / f"fold_{fold_id}_ElasticNet.csv")
+            enet = ElasticNet(random_state=config.random_seed)
+            enet.fit(X_train, y_train_ml)
+            enet_pred = _recursive_model_predictions(
+                enet, y_train, val_idx, list(X_train.columns), config
+            )
+            metrics = _evaluate_predictions(y_val, enet_pred, config)
+            metrics_row = {"fold": fold_id, "model": "ElasticNet", **metrics}
+            fold_metrics.append(metrics_row)
+            model_scores.setdefault("ElasticNet", []).append(metrics["MAE"])
+            pred_df = pd.DataFrame({"y_true": y_val, "y_pred": enet_pred})
+            pred_df.to_csv(predictions_dir / f"fold_{fold_id}_ElasticNet.csv")
 
     metrics_df = pd.DataFrame(fold_metrics)
     summary = {
@@ -316,7 +413,7 @@ def _train_final_model(
             raise ValueError("ETS training failed for final model.")
         return {"model": "ETS", "fit": None}
 
-    X_all, y_all = build_ml_features(df_trainval, config, include_weather=True)
+    X_all, y_all = build_ml_features(df_trainval, config)
     if model_name == "ElasticNet":
         from sklearn.linear_model import ElasticNet
 
@@ -334,10 +431,6 @@ def main() -> None:
     df = load_eskom_data(CONFIG)
     logger.info("Engineering target...")
     df = engineer_target(df, CONFIG)
-    logger.info("Fetching Meteostat weather...")
-    weather = fetch_meteostat_hourly(df.index.min(), df.index.max(), CONFIG)
-    logger.info("Merging Eskom + weather...")
-    df = merge_eskom_weather(df, weather, CONFIG)
     processed_path = save_processed_dataset(df, CONFIG)
     logger.info(f"Processed dataset saved to {processed_path}")
 
@@ -370,7 +463,7 @@ def main() -> None:
 
     if CONFIG.run_test_eval:
         logger.info("Running test evaluation...")
-        X_test, y_test = build_ml_features(df, CONFIG, include_weather=True)
+        X_test, y_test = build_ml_features(df, CONFIG)
         test_idx = df_test.index.intersection(X_test.index)
         if test_idx.empty:
             raise ValueError("No test indices available after feature generation.")

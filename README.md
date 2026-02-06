@@ -7,7 +7,6 @@
 This project aims to accurately predict the South Africa's hourly energy demand using:
 
 - **Eskom historical electricity demand data**
-- **Weather data from Meteostat (temperature, wind, humidity, etc.)**
 
 The goal is to **predict short-term electricity demand (hourly)** to support:
 - Energy production planning
@@ -23,7 +22,6 @@ This repository demonstrates an **end-to-end data science workflow**, from raw d
 
 Electricity demand forecasting is **critical** in South Africa due to:
 - Load shedding risk
-- High variability from weather
 - Increasing renewable energy penetration
 - Operational and financial planning requirements
 
@@ -39,7 +37,6 @@ Accurate hourly forecasts allow:
 
 Electricity demand forecasting is **critical** in South Africa due to:
 - Load shedding risk
-- High variability from weather
 - Increasing renewable energy penetration
 - Operational and financial planning requirements
 
@@ -62,21 +59,46 @@ Accurate hourly forecasts allow:
 
 > Eskom is South Africa’s primary electricity utility and the authoritative source for national demand data.
 
-### 2. Weather Data
-- Source: **(https://dev.meteostat.net/python/api/meteostat.hourly?utm_source=chatgpt.com)**
-- Variables used:
-  - Air temperature
-  - Wind speed
-  - Relative humidity
-  - Atmospheric pressure
+## How to Run
 
-Weather is a **first-order driver** of electricity demand due to:
-- Heating and cooling usage
-- Industrial sensitivity to temperature
-- Seasonal consumption patterns
+### 1) Install dependencies
+```bash
+make requirements
+```
 
- **Why combine demand + weather?**  
-Electricity demand is **not purely time-driven**. Weather explains a large portion of short-term demand variation that pure time-series models cannot capture alone.
+### 2) Prepare data files
+Place the Eskom raw CSV in:
+`data/raw/ESK17472.csv`
+
+### 3) Configure splits
+Update `eskom_energy_demand_forecasting/config.py` before training:
+- `train_end`, `val_end`, `test_end`
+- `timezone`, `freq`, and `timestamp_format` if your data changes
+
+Example:
+```python
+train_end = "2024-09-30 03:00:00+02:00"
+val_end = "2025-07-01 00:00:00+02:00"
+test_end = "2026-03-31 23:00:00+02:00"
+```
+
+### 4) Build processed dataset
+```bash
+make data
+```
+
+### 5) Train models (test evaluation disabled by default)
+```bash
+make train
+```
+
+### 6) Generate predictions
+```bash
+make predict
+```
+
+Notes:
+- Test evaluation is gated by `run_test_eval` in `eskom_energy_demand_forecasting/config.py` and is **disabled** by default.
 
 ---
 ## Project Organization
@@ -88,7 +110,7 @@ This repository follows a **cookiecutter-style data science layout** to mirror r
 ├── Makefile           <- Makefile with convenience commands like `make data` or `make train`
 ├── README.md          <- The top-level README for developers using this project.
 ├── data
-│   ├── external       <- Data from Eskom Data Portal and Meteostat.
+│   ├── external       <- Data from Eskom Data Portal.
 │   ├── interim        <- Intermediate data that has been transformed.
 │   ├── processed      <- The final, canonical data sets for modeling.
 │   └── raw            <- The original, immutable data dump.
