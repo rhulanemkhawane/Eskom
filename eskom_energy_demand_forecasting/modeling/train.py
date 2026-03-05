@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 from loguru import logger
 import typer
+from sklearn.preprocessing import StandardScaler
 
 from eskom_energy_demand_forecasting.config import CONFIG
 from eskom_energy_demand_forecasting.dataset import (
@@ -173,6 +174,152 @@ def _calendar_features_for_ts(ts: pd.Timestamp) -> Dict[str, float]:
     }
 
 
+def _lstm_feature_columns() -> List[str]:
+    return [
+        "y",
+        "hour",
+        "dayofweek",
+        "month",
+        "is_weekend",
+        "hour_sin",
+        "hour_cos",
+        "dow_sin",
+        "dow_cos",
+    ]
+
+
+def _lstm_feature_vector(ts: pd.Timestamp, y_value: float) -> List[float]:
+    cal = _calendar_features_for_ts(ts)
+    return [
+        float(y_value),
+        float(cal["hour"]),
+        float(cal["dayofweek"]),
+        float(cal["month"]),
+        float(cal["is_weekend"]),
+        float(cal["hour_sin"]),
+        float(cal["hour_cos"]),
+        float(cal["dow_sin"]),
+        float(cal["dow_cos"]),
+    ]
+
+
+def _build_lstm_training_data(
+    y_series: pd.Series, seq_len: int, config=CONFIG
+) -> Tuple[np.ndarray, np.ndarray]:
+    y_series = y_series.dropna()
+    if len(y_series) <= seq_len:
+        raise ValueError("Not enough history to build LSTM sequences.")
+
+    X_list: List[np.ndarray] = []
+    y_list: List[float] = []
+    for idx in range(seq_len, len(y_series)):
+        window = y_series.iloc[idx - seq_len : idx]
+        seq = np.zeros((seq_len, len(_lstm_feature_columns())), dtype=np.float32)
+        for i, (ts, y_val) in enumerate(window.items()):
+            seq[i] = np.array(_lstm_feature_vector(ts, y_val), dtype=np.float32)
+        X_list.append(seq)
+        y_list.append(float(y_series.iloc[idx]))
+    return np.stack(X_list), np.array(y_list, dtype=np.float32)
+
+
+def _build_lstm_sequence_from_history(
+    history: pd.Series, seq_len: int
+) -> Optional[np.ndarray]:
+    if len(history) < seq_len:
+        return None
+    window = history.iloc[-seq_len:]
+    seq = np.zeros((seq_len, len(_lstm_feature_columns())), dtype=np.float32)
+    for i, (ts, y_val) in enumerate(window.items()):
+        seq[i] = np.array(_lstm_feature_vector(ts, y_val), dtype=np.float32)
+    return seq
+
+
+def _get_tf():
+    try:
+        import tensorflow as tf
+    except ModuleNotFoundError:
+        logger.warning("tensorflow not installed; skipping LSTM model.")
+        return None
+    return tf
+
+
+def _build_lstm_model(seq_len: int, n_features: int, config=CONFIG):
+    tf = _get_tf()
+    if tf is None:
+        return None
+    tf.random.set_seed(config.random_seed)
+    from tensorflow.keras import Sequential
+    from tensorflow.keras.layers import Dense, Dropout, Input, LSTM
+
+    lstm_units_2 = max(16, config.lstm_units // 2)
+    model = Sequential(
+        [
+            Input(shape=(seq_len, n_features)),
+            LSTM(config.lstm_units, return_sequences=True),
+            Dropout(config.lstm_dropout),
+            LSTM(lstm_units_2),
+            Dropout(config.lstm_dropout),
+            Dense(config.lstm_dense_units, activation="relu"),
+            Dense(1),
+        ]
+    )
+    model.compile(optimizer="adam", loss="mse")
+    return model
+
+
+def _train_lstm_model(
+    y_train: pd.Series, config=CONFIG
+) -> Optional[Dict[str, object]]:
+    tf = _get_tf()
+    if tf is None:
+        return None
+    seq_len = config.lstm_sequence_length
+    np.random.seed(config.random_seed)
+
+    try:
+        X_train, y_train_arr = _build_lstm_training_data(y_train, seq_len, config)
+    except ValueError as exc:
+        logger.warning(f"LSTM skipped: {exc}")
+        return None
+
+    feature_scaler = StandardScaler()
+    target_scaler = StandardScaler()
+
+    X_flat = X_train.reshape(-1, X_train.shape[-1])
+    X_scaled = feature_scaler.fit_transform(X_flat).reshape(X_train.shape)
+    y_scaled = target_scaler.fit_transform(y_train_arr.reshape(-1, 1)).ravel()
+
+    model = _build_lstm_model(seq_len, X_train.shape[-1], config)
+    if model is None:
+        return None
+
+    callbacks = [
+        tf.keras.callbacks.EarlyStopping(
+            monitor="val_loss",
+            patience=config.lstm_patience,
+            restore_best_weights=True,
+        )
+    ]
+
+    model.fit(
+        X_scaled,
+        y_scaled,
+        epochs=config.lstm_epochs,
+        batch_size=config.lstm_batch_size,
+        validation_split=config.lstm_validation_split,
+        verbose=0,
+        callbacks=callbacks,
+    )
+
+    return {
+        "model": model,
+        "feature_scaler": feature_scaler,
+        "target_scaler": target_scaler,
+        "sequence_length": seq_len,
+        "feature_columns": _lstm_feature_columns(),
+    }
+
+
 def _lag_and_roll_features(history: pd.Series, config=CONFIG) -> Dict[str, float]:
     feats: Dict[str, float] = {}
     for lag in config.target_lags:
@@ -252,32 +399,59 @@ def _recursive_model_predictions(
     return pd.Series(preds, index=val_idx)
 
 
+def _recursive_lstm_predictions(
+    model,
+    y_history: pd.Series,
+    val_idx: pd.DatetimeIndex,
+    feature_scaler: StandardScaler,
+    target_scaler: StandardScaler,
+    seq_len: int,
+) -> pd.Series:
+    preds: List[float] = []
+    history = y_history.copy()
+    n_features = len(_lstm_feature_columns())
+
+    for ts in val_idx:
+        seq = _build_lstm_sequence_from_history(history, seq_len)
+        if seq is None:
+            pred = np.nan
+        else:
+            seq_scaled = feature_scaler.transform(seq).reshape(1, seq_len, n_features)
+            pred_scaled = float(model.predict(seq_scaled, verbose=0)[0, 0])
+            pred = float(target_scaler.inverse_transform([[pred_scaled]])[0, 0])
+        preds.append(pred)
+        history = pd.concat([history, pd.Series([pred], index=[ts])])
+    return pd.Series(preds, index=val_idx)
+
+
 def _get_tree_model():
-    try:
-        from lightgbm import LGBMRegressor
+    if CONFIG.enable_xgboost:
+        try:
+            from xgboost import XGBRegressor
 
-        return "LightGBM", LGBMRegressor(
-            n_estimators=300,
-            learning_rate=0.05,
-            num_leaves=31,
-            random_state=CONFIG.random_seed,
-        )
-    except ModuleNotFoundError:
-        pass
+            return "XGBoost", XGBRegressor(
+                n_estimators=300,
+                learning_rate=0.05,
+                max_depth=6,
+                subsample=0.9,
+                colsample_bytree=0.9,
+                random_state=CONFIG.random_seed,
+            )
+        except ModuleNotFoundError:
+            pass
 
-    try:
-        from xgboost import XGBRegressor
+    if CONFIG.enable_lightgbm:
+        try:
+            from lightgbm import LGBMRegressor
 
-        return "XGBoost", XGBRegressor(
-            n_estimators=300,
-            learning_rate=0.05,
-            max_depth=6,
-            subsample=0.9,
-            colsample_bytree=0.9,
-            random_state=CONFIG.random_seed,
-        )
-    except ModuleNotFoundError:
-        pass
+            return "LightGBM", LGBMRegressor(
+                n_estimators=300,
+                learning_rate=0.05,
+                num_leaves=31,
+                random_state=CONFIG.random_seed,
+            )
+        except ModuleNotFoundError:
+            pass
 
     from sklearn.ensemble import HistGradientBoostingRegressor
 
@@ -353,8 +527,29 @@ def rolling_origin_backtest(
             logger.warning("Skipping ML models for fold due to empty feature set.")
             continue
 
-        # Tree-based
-        if config.enable_tree_model:
+        # LSTM
+        lstm_used = False
+        if config.enable_lstm:
+            lstm_artifacts = _train_lstm_model(y_train, config)
+            if lstm_artifacts is not None:
+                lstm_used = True
+                lstm_pred = _recursive_lstm_predictions(
+                    lstm_artifacts["model"],
+                    y_train,
+                    val_idx,
+                    lstm_artifacts["feature_scaler"],
+                    lstm_artifacts["target_scaler"],
+                    lstm_artifacts["sequence_length"],
+                )
+                metrics = _evaluate_predictions(y_val, lstm_pred, config)
+                metrics_row = {"fold": fold_id, "model": "LSTM", **metrics}
+                fold_metrics.append(metrics_row)
+                model_scores.setdefault("LSTM", []).append(metrics["MAE"])
+                pred_df = pd.DataFrame({"y_true": y_val, "y_pred": lstm_pred})
+                pred_df.to_csv(predictions_dir / f"fold_{fold_id}_LSTM.csv")
+
+        # Tree-based (fallback)
+        if config.enable_tree_model and not lstm_used:
             tree_name, tree_model = _get_tree_model()
             tree_model.fit(X_train, y_train_ml)
             tree_pred = _recursive_model_predictions(
@@ -413,6 +608,22 @@ def _train_final_model(
             raise ValueError("ETS training failed for final model.")
         return {"model": "ETS", "fit": None}
 
+    if model_name == "LSTM":
+        lstm_artifacts = _train_lstm_model(y_series, config)
+        if lstm_artifacts is None:
+            raise ValueError("LSTM training failed for final model.")
+        model_path = config.models_dir / "final_lstm_model.keras"
+        lstm_artifacts["model"].save(model_path)
+        return {
+            "model": "LSTM",
+            "fit": lstm_artifacts["model"],
+            "feature_scaler": lstm_artifacts["feature_scaler"],
+            "target_scaler": lstm_artifacts["target_scaler"],
+            "sequence_length": lstm_artifacts["sequence_length"],
+            "feature_columns": lstm_artifacts["feature_columns"],
+            "model_path": model_path,
+        }
+
     X_all, y_all = build_ml_features(df_trainval, config)
     if model_name == "ElasticNet":
         from sklearn.linear_model import ElasticNet
@@ -455,7 +666,11 @@ def main() -> None:
     final_model_name = _select_final_model(summary)
     final_model = _train_final_model(df_trainval, final_model_name, CONFIG)
     final_model_path = CONFIG.models_dir / CONFIG.final_model_filename
-    joblib.dump(final_model, final_model_path)
+
+    final_model_to_save = dict(final_model)
+    if final_model_to_save.get("model") == "LSTM":
+        final_model_to_save["fit"] = None
+    joblib.dump(final_model_to_save, final_model_path)
     logger.info(f"Final model saved to {final_model_path}")
 
     config_path = CONFIG.models_dir / "config.json"
@@ -471,6 +686,15 @@ def main() -> None:
         if final_model["model"] == "ETS":
             ets_pred = _train_ets(build_target_series(df_trainval, CONFIG), len(test_idx))
             y_pred = pd.Series(ets_pred, index=test_idx)
+        elif final_model["model"] == "LSTM":
+            y_pred = _recursive_lstm_predictions(
+                final_model["fit"],
+                build_target_series(df_trainval, CONFIG),
+                test_idx,
+                final_model["feature_scaler"],
+                final_model["target_scaler"],
+                final_model["sequence_length"],
+            )
         else:
             model = final_model["fit"]
             y_pred = pd.Series(model.predict(X_test.loc[test_idx]), index=test_idx)

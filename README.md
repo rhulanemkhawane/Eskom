@@ -71,15 +71,15 @@ Place the Eskom raw CSV in:
 `data/raw/ESK17472.csv`
 
 ### 3) Configure splits
-Update `eskom_energy_demand_forecasting/config.py` before training:
+Update `eskom_energy_demand_forecasting/config.yaml` before training:
 - `train_end`, `val_end`, `test_end`
 - `timezone`, `freq`, and `timestamp_format` if your data changes
 
 Example:
-```python
-train_end = "2024-09-30 03:00:00+02:00"
-val_end = "2025-07-01 00:00:00+02:00"
-test_end = "2026-03-31 23:00:00+02:00"
+```yaml
+train_end: "2024-09-30 03:00:00+02:00"
+val_end: "2025-07-01 00:00:00+02:00"
+test_end: "2026-03-31 23:00:00+02:00"
 ```
 
 ### 4) Build processed dataset
@@ -98,7 +98,36 @@ make predict
 ```
 
 Notes:
-- Test evaluation is gated by `run_test_eval` in `eskom_energy_demand_forecasting/config.py` and is **disabled** by default.
+- Test evaluation is gated by `run_test_eval` in `eskom_energy_demand_forecasting/config.yaml` and is **disabled** by default.
+
+---
+## LSTM Model
+
+The training pipeline can use an LSTM sequence model (TensorFlow) instead of tree-based models. It builds
+sequences of past target values plus calendar features (hour, day-of-week, month, and cyclic encodings)
+and performs recursive forecasting across each validation horizon.
+
+Requires `tensorflow` from `requirements.txt`.
+
+Defaults are tuned for the current dataset size (~5 years of hourly data) and weekly seasonality:
+- `LSTM_SEQUENCE_LENGTH=336` (two weeks of hourly history)
+- Two LSTM layers with 64 then 32 units and dropout
+- Batch size 128 with early stopping
+
+LSTM outputs:
+- Saved model: `models/final_lstm_model.keras`
+- Metadata and scalers: `models/final_model.pkl`
+
+Environment variables (optional):
+- `ENABLE_LSTM` (true/false)
+- `LSTM_SEQUENCE_LENGTH`
+- `LSTM_UNITS`
+- `LSTM_DENSE_UNITS`
+- `LSTM_DROPOUT`
+- `LSTM_EPOCHS`
+- `LSTM_BATCH_SIZE`
+- `LSTM_PATIENCE`
+- `LSTM_VALIDATION_SPLIT`
 
 ---
 ## Project Organization
@@ -140,7 +169,8 @@ This repository follows a **cookiecutter-style data science layout** to mirror r
     │
     ├── __init__.py             <- Makes eskom_energy_demand_forecasting a Python module
     │
-    ├── config.py               <- Store useful variables and configuration
+    ├── config.py               <- Load and validate YAML configuration
+    ├── config.yaml             <- Project configuration values
     │
     ├── dataset.py              <- Scripts to download or generate data
     │

@@ -128,3 +128,17 @@ test_end = "YYYY-MM-DD HH:00:00+02:00"
 ## Updated Gaps After Fixes
 - Full backtest with default folds/horizons is still not verified in this environment.
 - Tree model stability in this sandbox is unverified (process aborts during fit). Consider switching to a pure-sklearn model or running on a different environment for validation.
+
+---
+
+## LSTM Update (2026-02-06)
+**Change summary**
+- Added LSTM training and recursive forecasting with calendar features.
+- Default LSTM settings tuned for weekly seasonality (sequence length 336) and multi-year hourly data.
+
+**Quick run attempts**
+- Command: `make train`
+  - Result: Failed due to pip attempting to reach the internet (requirements install).
+- Command: `python -m eskom_energy_demand_forecasting.modeling.train`
+  - Result: Aborted with `Signal(6)` in this sandbox before completion.
+  - Impact: No new metrics or model artifacts verified in this run.
