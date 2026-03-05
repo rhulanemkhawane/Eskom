@@ -71,7 +71,7 @@ Place the Eskom raw CSV in:
 `data/raw/ESK17472.csv`
 
 ### 3) Configure splits
-Update `eskom_energy_demand_forecasting/config.yaml` before training:
+Update `configs/config.yaml` before training:
 - `train_end`, `val_end`, `test_end`
 - `timezone`, `freq`, and `timestamp_format` if your data changes
 
@@ -98,7 +98,7 @@ make predict
 ```
 
 Notes:
-- Test evaluation is gated by `run_test_eval` in `eskom_energy_demand_forecasting/config.yaml` and is **disabled** by default.
+- Test evaluation is gated by `run_test_eval` in `configs/config.yaml` and is **disabled** by default.
 
 ---
 ## LSTM Model
@@ -163,25 +163,26 @@ This repository follows a **cookiecutter-style data science layout** to mirror r
 ├── requirements.txt   <- The requirements file for reproducing the analysis environment, e.g.
 │                         generated with `pip freeze > requirements.txt`
 │
-├── setup.cfg          <- Configuration file for flake8
+├── configs            <- YAML/TOML configuration files
+│   └── config.yaml    <- Project configuration values
 │
-└── eskom_energy_demand_forecasting   <- Source code for use in this project.
-    │
-    ├── __init__.py             <- Makes eskom_energy_demand_forecasting a Python module
-    │
-    ├── config.py               <- Load and validate YAML configuration
-    ├── config.yaml             <- Project configuration values
-    │
-    ├── dataset.py              <- Scripts to download or generate data
-    │
-    ├── features.py             <- Code to create features for modeling
-    │
-    ├── modeling                
-    │   ├── __init__.py 
-    │   ├── predict.py          <- Code to run model inference with trained models          
-    │   └── train.py            <- Code to train models
-    │
-    └── plots.py                <- Code to create visualizations
+├── scripts            <- Utility scripts and automation helpers
+│
+├── src
+│   └── eskom_energy_demand_forecasting   <- Source code for use in this project.
+│       │
+│       ├── __init__.py             <- Makes eskom_energy_demand_forecasting a Python module
+│       ├── config.py               <- Load and validate YAML configuration
+│       ├── dataset.py              <- Scripts to download or generate data
+│       ├── features.py             <- Code to create features for modeling
+│       ├── data/                   <- Data-loading package namespace
+│       ├── models/                 <- Model package namespace
+│       ├── modeling                
+│       │   ├── __init__.py 
+│       │   ├── predict.py          <- Code to run model inference with trained models          
+│       │   └── train.py            <- Code to train models
+│       ├── visualization/          <- Visualization package namespace
+│       └── plots.py                <- Code to create visualizations
 ```
 
 --------

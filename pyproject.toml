@@ -17,11 +17,13 @@ classifiers = [
 ]
 requires-python = "~=3.10.0"
 
+[tool.flit.module]
+name = "eskom_energy_demand_forecasting"
 
 [tool.ruff]
 line-length = 99
-src = ["eskom_energy_demand_forecasting"]
-include = ["pyproject.toml", "eskom_energy_demand_forecasting/**/*.py"]
+src = ["src"]
+include = ["pyproject.toml", "src/**/*.py", "tests/**/*.py"]
 
 [tool.ruff.lint]
 extend-select = ["I"]  # Add import sorting
@@ -29,4 +31,3 @@ extend-select = ["I"]  # Add import sorting
 [tool.ruff.lint.isort]
 known-first-party = ["eskom_energy_demand_forecasting"]
 force-sort-within-sections = true
-

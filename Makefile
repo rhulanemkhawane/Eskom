@@ -5,6 +5,7 @@
 PROJECT_NAME = eskom
 PYTHON_VERSION = 3.10
 PYTHON_INTERPRETER = python
+PYTHONPATH = src
 
 #################################################################################
 # COMMANDS                                                                      #
@@ -60,17 +61,17 @@ create_environment:
 ## Make dataset
 .PHONY: data
 data: requirements
-	$(PYTHON_INTERPRETER) eskom_energy_demand_forecasting/dataset.py
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON_INTERPRETER) -m eskom_energy_demand_forecasting.dataset
 
 ## Train models (RUN_TEST_EVAL stays False)
 .PHONY: train
 train: requirements
-	$(PYTHON_INTERPRETER) -m eskom_energy_demand_forecasting.modeling.train
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON_INTERPRETER) -m eskom_energy_demand_forecasting.modeling.train
 
 ## Generate predictions
 .PHONY: predict
 predict: requirements
-	$(PYTHON_INTERPRETER) -m eskom_energy_demand_forecasting.modeling.predict
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON_INTERPRETER) -m eskom_energy_demand_forecasting.modeling.predict
 
 
 #################################################################################
