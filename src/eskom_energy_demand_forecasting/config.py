@@ -98,17 +98,6 @@ class ProjectConfig:
     enable_ets: bool = True
     enable_lightgbm: bool = False
     enable_xgboost: bool = True
-    enable_lstm: bool = True
-
-    # LSTM settings
-    lstm_sequence_length: int = 336
-    lstm_units: int = 64
-    lstm_dense_units: int = 32
-    lstm_dropout: float = 0.2
-    lstm_epochs: int = 30
-    lstm_batch_size: int = 128
-    lstm_patience: int = 6
-    lstm_validation_split: float = 0.1
 
     # Output files
     fold_metrics_filename: str = "fold_metrics.csv"
@@ -157,20 +146,6 @@ class ProjectConfig:
         base["enable_ets"] = _env_bool("ENABLE_ETS", bool(base["enable_ets"]))
         base["enable_lightgbm"] = _env_bool("ENABLE_LIGHTGBM", bool(base["enable_lightgbm"]))
         base["enable_xgboost"] = _env_bool("ENABLE_XGBOOST", bool(base["enable_xgboost"]))
-        base["enable_lstm"] = _env_bool("ENABLE_LSTM", bool(base["enable_lstm"]))
-
-        base["lstm_sequence_length"] = _env_int(
-            "LSTM_SEQUENCE_LENGTH", int(base["lstm_sequence_length"])
-        )
-        base["lstm_units"] = _env_int("LSTM_UNITS", int(base["lstm_units"]))
-        base["lstm_dense_units"] = _env_int("LSTM_DENSE_UNITS", int(base["lstm_dense_units"]))
-        base["lstm_dropout"] = _env_float("LSTM_DROPOUT", float(base["lstm_dropout"]))
-        base["lstm_epochs"] = _env_int("LSTM_EPOCHS", int(base["lstm_epochs"]))
-        base["lstm_batch_size"] = _env_int("LSTM_BATCH_SIZE", int(base["lstm_batch_size"]))
-        base["lstm_patience"] = _env_int("LSTM_PATIENCE", int(base["lstm_patience"]))
-        base["lstm_validation_split"] = _env_float(
-            "LSTM_VALIDATION_SPLIT", float(base["lstm_validation_split"])
-        )
 
         return cls(**base)
 

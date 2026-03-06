@@ -86,50 +86,36 @@ Notes:
 - Test evaluation is gated by `run_test_eval` in `configs/config.yaml` and is **disabled** by default.
 
 ---
-## LSTM Model
+## XGBoost Model
 
-The training pipeline can use an LSTM sequence model (TensorFlow) instead of tree-based models. It builds
-sequences of past target values plus calendar features (hour, day-of-week, month, and cyclic encodings)
+The training pipeline uses XGBoost as the primary tree-based model. It trains on lag and rolling-window
+features derived from the target series plus calendar features (hour, day-of-week, month, cyclic encodings)
 and performs recursive forecasting across each validation horizon.
 
-Requires `tensorflow` from `requirements.txt`.
+Requires `xgboost` from `requirements.txt`.
 
-Defaults are tuned for the current dataset size (~5 years of hourly data) and weekly seasonality:
-- `LSTM_SEQUENCE_LENGTH=336` (two weeks of hourly history)
-- Two LSTM layers with 64 then 32 units and dropout
-- Batch size 128 with early stopping
+Default hyperparameters:
+- `n_estimators=300`, `learning_rate=0.05`, `max_depth=6`
+- `subsample=0.9`, `colsample_bytree=0.9`
 
-LSTM outputs:
-- Saved model: `models/final_lstm_model.keras`
-- Metadata and scalers: `models/final_model.pkl`
+If XGBoost is not installed the pipeline falls back to LightGBM (if enabled) and then
+`HistGradientBoostingRegressor` from scikit-learn.
 
 Environment variables (optional):
-- `ENABLE_LSTM` (true/false)
-- `LSTM_SEQUENCE_LENGTH`
-- `LSTM_UNITS`
-- `LSTM_DENSE_UNITS`
-- `LSTM_DROPOUT`
-- `LSTM_EPOCHS`
-- `LSTM_BATCH_SIZE`
-- `LSTM_PATIENCE`
-- `LSTM_VALIDATION_SPLIT`
+- `ENABLE_XGBOOST` (true/false)
+- `ENABLE_LIGHTGBM` (true/false)
+- `ENABLE_TREE_MODEL` (true/false)
 
-### LSTM Validation Run (2026-03-05)
+### Backtest Results (6-fold rolling-origin, 24-hour horizon)
 
-I ran the pipeline end-to-end without test-set evaluation (`run_test_eval: false`):
+| Model | Mean MAE | vs SeasonalNaive |
+|---|---|---|
+| XGBoost | ~501 | -22% |
+| SeasonalNaive | ~644 | baseline |
+| ETS | ~651 | +1% |
+| ElasticNet | ~729 | +13% |
 
-```bash
-PYTHONPATH=src ./.venv/bin/python -m eskom_energy_demand_forecasting.modeling.train
-PYTHONPATH=src ./.venv/bin/python -m eskom_energy_demand_forecasting.modeling.predict
-```
-
-LSTM check result in this environment:
-- `ENABLE_LSTM=true` does **not** complete successfully (TensorFlow import/runtime hangs with mutex errors), so no `LSTM` rows are produced in `reports/fold_metrics.csv`.
-- The rest of the pipeline runs successfully with `ENABLE_LSTM=false`.
-
-Validation prediction accuracy figure (`Accuracy = 100 - MAPE`) from the successful non-test run:
-
-![Validation prediction accuracy by model](reports/figures/lstm_prediction_accuracy.png)
+XGBoost is selected as the final model and saved to `models/final_model.pkl`.
 
 ---
 ## Project Organization

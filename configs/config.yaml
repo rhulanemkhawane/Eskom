@@ -50,17 +50,6 @@ enable_elasticnet: true
 enable_ets: true
 enable_lightgbm: false
 enable_xgboost: true
-enable_lstm: true
-
-# LSTM settings
-lstm_sequence_length: 336
-lstm_units: 64
-lstm_dense_units: 32
-lstm_dropout: 0.2
-lstm_epochs: 30
-lstm_batch_size: 128
-lstm_patience: 6
-lstm_validation_split: 0.1
 
 # Output files
 fold_metrics_filename: fold_metrics.csv
