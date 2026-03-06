@@ -108,12 +108,14 @@ Environment variables (optional):
 
 ### Backtest Results (6-fold rolling-origin, 24-hour horizon)
 
-| Model | Mean MAE | vs SeasonalNaive |
-|---|---|---|
-| XGBoost | ~501 | -22% |
-| SeasonalNaive | ~644 | baseline |
-| ETS | ~651 | +1% |
-| ElasticNet | ~729 | +13% |
+| Model | Mean MAE | Accuracy (100 − MAPE) | vs SeasonalNaive |
+|---|---|---|---|
+| XGBoost | ~481 | 98.16% | −25% |
+| SeasonalNaive | ~644 | 97.55% | baseline |
+| ETS | ~651 | 97.47% | +1% |
+| ElasticNet | ~729 | 97.19% | +13% |
+
+![Validation Prediction Accuracy by Model](reports/figures/prediction_accuracy.png)
 
 XGBoost is selected as the final model and saved to `models/final_model.pkl`.
 
