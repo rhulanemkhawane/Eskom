@@ -33,21 +33,6 @@ Accurate hourly forecasts allow:
 
 ---
 
-## Business Motivation (Why This Project Matters)
-
-Electricity demand forecasting is **critical** in South Africa due to:
-- Load shedding risk
-- Increasing renewable energy penetration
-- Operational and financial planning requirements
-
-Accurate hourly forecasts allow:
-- Better dispatch planning
-- Reduced operating costs
-- Improved grid reliability
-- Data-driven decision-making for utilities and energy traders
-
----
-
 ## Data Sources
 
 ### 1. Eskom Electricity Demand Data
@@ -128,6 +113,23 @@ Environment variables (optional):
 - `LSTM_BATCH_SIZE`
 - `LSTM_PATIENCE`
 - `LSTM_VALIDATION_SPLIT`
+
+### LSTM Validation Run (2026-03-05)
+
+I ran the pipeline end-to-end without test-set evaluation (`run_test_eval: false`):
+
+```bash
+PYTHONPATH=src ./.venv/bin/python -m eskom_energy_demand_forecasting.modeling.train
+PYTHONPATH=src ./.venv/bin/python -m eskom_energy_demand_forecasting.modeling.predict
+```
+
+LSTM check result in this environment:
+- `ENABLE_LSTM=true` does **not** complete successfully (TensorFlow import/runtime hangs with mutex errors), so no `LSTM` rows are produced in `reports/fold_metrics.csv`.
+- The rest of the pipeline runs successfully with `ENABLE_LSTM=false`.
+
+Validation prediction accuracy figure (`Accuracy = 100 - MAPE`) from the successful non-test run:
+
+![Validation prediction accuracy by model](reports/figures/lstm_prediction_accuracy.png)
 
 ---
 ## Project Organization
