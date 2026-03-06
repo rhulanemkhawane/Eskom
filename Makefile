@@ -73,6 +73,11 @@ train: requirements
 predict: requirements
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON_INTERPRETER) -m eskom_energy_demand_forecasting.modeling.predict
 
+## Generate figures in reports/figures
+.PHONY: plots
+plots: requirements
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON_INTERPRETER) -m eskom_energy_demand_forecasting.plots
+
 
 #################################################################################
 # Self Documenting Commands                                                     #

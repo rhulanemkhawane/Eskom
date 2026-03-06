@@ -429,6 +429,14 @@ def _train_final_model(
 
 @app.command()
 def main() -> None:
+    from eskom_energy_demand_forecasting.plots import (
+        plot_actual_vs_pred,
+        plot_feature_importance,
+        plot_metric_comparison,
+        plot_prediction_accuracy,
+        plot_residuals,
+    )
+
     logger.info("Loading Eskom data...")
     df = load_eskom_data(CONFIG)
     logger.info("Engineering target...")
@@ -462,6 +470,15 @@ def main() -> None:
 
     config_path = CONFIG.models_dir / "config.json"
     config_path.write_text(json.dumps(CONFIG.to_dict(), default=str, indent=2))
+
+    figures_dir = CONFIG.figures_dir
+    metrics_path = CONFIG.reports_dir / CONFIG.fold_metrics_filename
+    plot_actual_vs_pred(CONFIG.predictions_dir, figures_dir / "actual_vs_pred.png")
+    plot_residuals(CONFIG.predictions_dir, figures_dir / "residuals.png")
+    plot_metric_comparison(metrics_path, figures_dir / "metric_comparison.png")
+    plot_feature_importance(CONFIG.models_dir, figures_dir / "feature_importance.png")
+    plot_prediction_accuracy(metrics_path, figures_dir / "prediction_accuracy.png")
+    logger.success("Plots generated.")
 
     if CONFIG.run_test_eval:
         logger.info("Running test evaluation...")
